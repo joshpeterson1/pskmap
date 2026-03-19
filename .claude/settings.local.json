@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.pskreporter.info)",
+      "WebFetch(domain:v2.tauri.app)",
+      "Bash(cargo --version)",
+      "Bash(npm --version)",
+      "Bash(npm install:*)",
+      "Bash(cargo update:*)"
+    ]
+  }
+}

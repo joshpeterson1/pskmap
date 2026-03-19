@@ -1,0 +1,16 @@
+export const MODES = [
+  "All",
+  "FT8",
+  "FT4",
+  "CW",
+  "SSB",
+  "JS8",
+  "WSPR",
+  "RTTY",
+  "PSK31",
+  "JT65",
+  "JT9",
+  "MSK144",
+  "Q65",
+  "VARAC",
+];
