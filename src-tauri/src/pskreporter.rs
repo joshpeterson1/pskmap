@@ -14,11 +14,19 @@ fn get_client() -> &'static reqwest::Client {
     })
 }
 
+/// Result of a backfill fetch: spots + optional sequence number for incremental pulls.
+pub struct BackfillResult {
+    pub spots: Vec<Spot>,
+    pub last_sequence_number: Option<u64>,
+}
+
 /// JSONP response structure from pskquery5.pl with callback=doNothing
 #[derive(Deserialize)]
 struct PskResponse {
     #[serde(default, rename = "receptionReport")]
     reception_report: Vec<PskSpot>,
+    #[serde(default, rename = "lastSequenceNumber")]
+    last_sequence_number: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -45,16 +53,31 @@ struct PskSpot {
     sender_lotw_upload: Option<String>,
 }
 
-/// Fetch historical spots via the HTTP retrieve API (used for backfill on subscribe).
-pub async fn fetch_spots_http(query: &SpotQuery) -> Result<Vec<Spot>, String> {
+/// Fetch spots via HTTP. If `last_seq_no` is provided, does an incremental fetch;
+/// otherwise pulls the full 24h backfill.
+pub async fn fetch_spots_http(
+    query: &SpotQuery,
+    last_seq_no: Option<u64>,
+) -> Result<BackfillResult, String> {
     let callsign = &query.callsign;
 
+    let time_param = match last_seq_no {
+        Some(seq) => format!("lastseqno={}", seq),
+        None => "flowStartSeconds=-86400".to_string(),
+    };
+
     let url = format!(
-        "https://pskreporter.info/cgi-bin/pskquery5.pl?callback=doNothing&mc_version=2025.11.28.1033&pskvers=2025.11.28.1032&statistics=1&noactive=1&nolocator=1&flowStartSeconds=-86400&senderCallsign={}",
+        "https://pskreporter.info/cgi-bin/pskquery5.pl?callback=doNothing&mc_version=2025.11.28.1033&pskvers=2025.11.28.1032&statistics=1&noactive=1&nolocator=1&{}&senderCallsign={}",
+        time_param,
         urlencoding::encode(callsign),
     );
 
-    println!("[PSKmap] HTTP backfill: {}", url);
+    let mode = if last_seq_no.is_some() {
+        "incremental"
+    } else {
+        "full"
+    };
+    println!("[PSKmap] HTTP backfill ({}): {}", mode, url);
 
     let client = get_client();
     let resp = client
@@ -86,7 +109,7 @@ pub async fn fetch_spots_http(query: &SpotQuery) -> Result<Vec<Spot>, String> {
     parse_jsonp_response(&body)
 }
 
-fn parse_jsonp_response(body: &str) -> Result<Vec<Spot>, String> {
+fn parse_jsonp_response(body: &str) -> Result<BackfillResult, String> {
     // Strip JSONP wrapper: doNothing({ ... })
     let json = body
         .find('(')
@@ -97,6 +120,8 @@ fn parse_jsonp_response(body: &str) -> Result<Vec<Spot>, String> {
         serde_json::from_str(json).map_err(|e| format!("JSON parse error: {}", e))?;
 
     let total = response.reception_report.len();
+    let last_seq = response.last_sequence_number;
+
     let spots: Vec<Spot> = response
         .reception_report
         .into_iter()
@@ -143,10 +168,14 @@ fn parse_jsonp_response(body: &str) -> Result<Vec<Spot>, String> {
         .collect();
 
     println!(
-        "[PSKmap] JSONP parsed: {} receptionReport → {} spots",
+        "[PSKmap] JSONP parsed: {} receptionReport → {} spots, lastSeqNo: {:?}",
         total,
-        spots.len()
+        spots.len(),
+        last_seq
     );
 
-    Ok(spots)
+    Ok(BackfillResult {
+        spots,
+        last_sequence_number: last_seq,
+    })
 }

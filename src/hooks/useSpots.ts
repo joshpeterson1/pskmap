@@ -135,5 +135,5 @@ export function useSpots() {
     []
   );
 
-  return { spots, loading, error, hasFetched, mqttStatus, fetchSpots };
+  return { spots, rawSpots, loading, error, hasFetched, mqttStatus, fetchSpots };
 }

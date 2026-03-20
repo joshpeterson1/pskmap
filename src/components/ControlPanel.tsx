@@ -1,14 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { BAND_NAMES } from "../lib/bands";
-import { MODES } from "../lib/modes";
-import type { ViewMode } from "../lib/types";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { freqToBand } from "../lib/bands";
+import type { Spot, ViewMode } from "../lib/types";
 
 interface Props {
   onFetch: (callsign: string, bands: string[], modes: string[], timeRange: number) => void;
   loading: boolean;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
-  spotCount: number;
+  rawSpots: Spot[];
 }
 
 const TIME_RANGES = [
@@ -80,16 +79,13 @@ function saveFavorites(favs: string[]) {
 
 const VIEW_MODES: ViewMode[] = ["map", "split", "table"];
 
-// All band options excluding "All"
-const BAND_OPTIONS = BAND_NAMES.filter((b) => b !== "All");
-// All mode options excluding "All"
-const MODE_OPTIONS = MODES.filter((m) => m !== "All");
+const BAND_ORDER = ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m", "2m"];
 
 function toggleInArray(arr: string[], item: string): string[] {
   return arr.includes(item) ? arr.filter((v) => v !== item) : [...arr, item];
 }
 
-export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spotCount }: Props) {
+export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, rawSpots }: Props) {
   const saved = useRef(loadPrefs()).current;
   const [callsign, setCallsign] = useState(saved.callsign ?? "");
   const [bands, setBands] = useState<string[]>(saved.bands ?? []);
@@ -99,6 +95,24 @@ export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spo
   const [callsignError, setCallsignError] = useState<string | null>(null);
   const lastFetchRef = useRef<{ callsign: string; bands: string[]; modes: string[]; timeRange: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Derive available bands/modes from raw spot data
+  const availableBands = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of rawSpots) {
+      const band = freqToBand(s.frequency);
+      if (band) set.add(band);
+    }
+    return BAND_ORDER.filter((b) => set.has(b));
+  }, [rawSpots]);
+
+  const availableModes = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of rawSpots) {
+      if (s.mode) set.add(s.mode.toUpperCase());
+    }
+    return Array.from(set).sort();
+  }, [rawSpots]);
 
   const validateCallsign = (cs: string): string | null => {
     const trimmed = cs.trim();
@@ -231,47 +245,51 @@ export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spo
           {callsignError && <span className="field-error">{callsignError}</span>}
         </div>
 
-        <div className="control-group">
-          <label>Band {bands.length > 0 && <span className="filter-count">({bands.length})</span>}</label>
-          <div className="multi-select">
-            {BAND_OPTIONS.map((b) => (
-              <button
-                key={b}
-                type="button"
-                className={`chip ${bands.includes(b) ? "chip--active" : ""}`}
-                onClick={() => setBands((prev) => toggleInArray(prev, b))}
-              >
-                {b}
-              </button>
-            ))}
-            {bands.length > 0 && (
-              <button type="button" className="chip chip--clear" onClick={() => setBands([])}>
-                Clear
-              </button>
-            )}
+        {availableBands.length > 1 && (
+          <div className="control-group">
+            <label>Band {bands.length > 0 && <span className="filter-count">({bands.length})</span>}</label>
+            <div className="multi-select">
+              {availableBands.map((b) => (
+                <button
+                  key={b}
+                  type="button"
+                  className={`chip ${bands.includes(b) ? "chip--active" : ""}`}
+                  onClick={() => setBands((prev) => toggleInArray(prev, b))}
+                >
+                  {b}
+                </button>
+              ))}
+              {bands.length > 0 && (
+                <button type="button" className="chip chip--clear" onClick={() => setBands([])}>
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="control-group">
-          <label>Mode {modes.length > 0 && <span className="filter-count">({modes.length})</span>}</label>
-          <div className="multi-select">
-            {MODE_OPTIONS.map((m) => (
-              <button
-                key={m}
-                type="button"
-                className={`chip ${modes.includes(m) ? "chip--active" : ""}`}
-                onClick={() => setModes((prev) => toggleInArray(prev, m))}
-              >
-                {m}
-              </button>
-            ))}
-            {modes.length > 0 && (
-              <button type="button" className="chip chip--clear" onClick={() => setModes([])}>
-                Clear
-              </button>
-            )}
+        {availableModes.length > 1 && (
+          <div className="control-group">
+            <label>Mode {modes.length > 0 && <span className="filter-count">({modes.length})</span>}</label>
+            <div className="multi-select">
+              {availableModes.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`chip ${modes.includes(m) ? "chip--active" : ""}`}
+                  onClick={() => setModes((prev) => toggleInArray(prev, m))}
+                >
+                  {m}
+                </button>
+              ))}
+              {modes.length > 0 && (
+                <button type="button" className="chip chip--clear" onClick={() => setModes([])}>
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="control-group">
           <label htmlFor="time">Time</label>

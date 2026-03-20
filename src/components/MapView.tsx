@@ -106,6 +106,17 @@ function MapContent({ spots, selectedIndex, onSelectSpot }: Props) {
     return () => { map.off("zoomend", onZoom); };
   }, [map]);
 
+  // Fix map size when container becomes visible (hidden → shown via display:none toggle)
+  useEffect(() => {
+    const observer = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    if (map.getContainer()) {
+      observer.observe(map.getContainer());
+    }
+    return () => observer.disconnect();
+  }, [map]);
+
   // Auto-fit bounds when callsign changes (not on auto-refresh)
   useEffect(() => {
     if (spots.length === 0) return;
@@ -158,6 +169,14 @@ function MapContent({ spots, selectedIndex, onSelectSpot }: Props) {
   }, [spots]);
 
   const lineOpacity = zoom < 4 ? 0 : zoom < 6 ? 0.15 : 0.3;
+
+  // Pan to selected spot
+  useEffect(() => {
+    if (selectedIndex == null) return;
+    const spot = spots[selectedIndex];
+    if (!spot || spot.receiverLat == null || spot.receiverLon == null) return;
+    map.panTo([spot.receiverLat, spot.receiverLon], { animate: true, duration: 0.5 });
+  }, [selectedIndex, spots, map]);
 
   const handleMarkerClick = useCallback((index: number) => {
     onSelectSpot?.(selectedIndex === index ? null : index);

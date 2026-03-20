@@ -1,6 +1,8 @@
+use crate::db;
 use crate::models::{MqttSpotRaw, Spot};
 use rumqttc::{AsyncClient, Event, Incoming, MqttOptions, QoS};
-use std::sync::Arc;
+use rusqlite::Connection;
+use std::sync::{Arc, Mutex as StdMutex};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
@@ -10,7 +12,7 @@ pub struct MqttManager {
 }
 
 impl MqttManager {
-    pub fn new(app_handle: AppHandle) -> Self {
+    pub fn new(app_handle: AppHandle, db_conn: Arc<StdMutex<Connection>>) -> Self {
         let client_id = format!("pskmap-{}", rand_suffix());
         let mut opts = MqttOptions::new(client_id, "mqtt.pskreporter.info", 1883);
         opts.set_keep_alive(std::time::Duration::from_secs(60));
@@ -27,6 +29,7 @@ impl MqttManager {
             app_handle,
             client_for_resub,
             task_callsign,
+            db_conn,
         ));
 
         MqttManager {
@@ -40,6 +43,7 @@ impl MqttManager {
         app_handle: AppHandle,
         client: AsyncClient,
         active_callsign: Arc<Mutex<Option<String>>>,
+        db_conn: Arc<StdMutex<Connection>>,
     ) {
         loop {
             match eventloop.poll().await {
@@ -47,6 +51,10 @@ impl MqttManager {
                     match serde_json::from_slice::<MqttSpotRaw>(&msg.payload) {
                         Ok(raw) => {
                             let spot: Spot = raw.into();
+                            // Persist to SQLite
+                            if let Ok(conn) = db_conn.lock() {
+                                db::insert_spot(&conn, &spot);
+                            }
                             let _ = app_handle.emit("spot", &spot);
                         }
                         Err(e) => {
