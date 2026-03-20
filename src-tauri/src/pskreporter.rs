@@ -2,55 +2,31 @@ use crate::models::{grid_to_latlon, haversine_km, Spot, SpotQuery};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-/// Band name to frequency range in Hz.
-pub fn band_to_frange(band: &str) -> Option<(u64, u64)> {
-    match band {
-        "160m" => Some((1_800_000, 2_000_000)),
-        "80m" => Some((3_500_000, 4_000_000)),
-        "60m" => Some((5_250_000, 5_450_000)),
-        "40m" => Some((7_000_000, 7_300_000)),
-        "30m" => Some((10_100_000, 10_150_000)),
-        "20m" => Some((14_000_000, 14_350_000)),
-        "17m" => Some((18_068_000, 18_168_000)),
-        "15m" => Some((21_000_000, 21_450_000)),
-        "12m" => Some((24_890_000, 24_990_000)),
-        "10m" => Some((28_000_000, 29_700_000)),
-        "6m" => Some((50_000_000, 54_000_000)),
-        "2m" => Some((144_000_000, 148_000_000)),
-        _ => None,
-    }
+/// Shared HTTP client — reused across all requests to keep connections alive.
+static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+fn get_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .gzip(true)
+            .build()
+            .expect("Failed to build HTTP client")
+    })
 }
 
-pub async fn fetch_spots(query: &SpotQuery) -> Result<Vec<Spot>, String> {
-    let mut url = format!(
-        "https://retrieve.pskreporter.info/query?senderCallsign={}&rronly=1&noactive=1&appcontact=josh%40somber.dev",
-        urlencoding::encode(&query.callsign)
+/// Fetch historical spots via the HTTP retrieve API (used for backfill on subscribe).
+pub async fn fetch_spots_http(query: &SpotQuery) -> Result<Vec<Spot>, String> {
+    let callsign = query.callsign.to_uppercase();
+
+    let url = format!(
+        "https://pskreporter.info/cgi-bin/pskquery5.pl?senderCallsign={}&noactive=1&nolocator=1&flowStartSeconds=-86400&appcontact=josh%40somber.dev",
+        urlencoding::encode(&callsign),
     );
 
-    if let Some(ref band) = query.band {
-        if band != "All" {
-            if let Some((lo, hi)) = band_to_frange(band) {
-                url.push_str(&format!("&frange={}-{}", lo, hi));
-            }
-        }
-    }
+    println!("[PSKmap] HTTP backfill: {}", url);
 
-    if let Some(ref mode) = query.mode {
-        if mode != "All" {
-            url.push_str(&format!("&mode={}", urlencoding::encode(mode)));
-        }
-    }
-
-    let seconds = query.time_range_seconds.abs();
-    url.push_str(&format!("&flowStartSeconds=-{}", seconds));
-
-    println!("[PSKmap] Requesting: {}", url);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
-
+    let client = get_client();
     let resp = client
         .get(&url)
         .header("User-Agent", "PSKmap/0.1.0")
@@ -59,10 +35,8 @@ pub async fn fetch_spots(query: &SpotQuery) -> Result<Vec<Spot>, String> {
         .map_err(|e| format!("HTTP request failed: {}", e))?;
 
     let status = resp.status();
-    println!("[PSKmap] Response status: {}", status);
     if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        println!("[PSKmap] Error body: {}", &body[..body.len().min(500)]);
+        let _body = resp.text().await.unwrap_or_default();
         return Err(format!("PSKreporter returned status {}", status));
     }
 
@@ -71,11 +45,11 @@ pub async fn fetch_spots(query: &SpotQuery) -> Result<Vec<Spot>, String> {
         .await
         .map_err(|e| format!("Failed to read response body: {}", e))?;
 
-    println!("[PSKmap] Response length: {} bytes", body.len());
-    if body.len() < 1000 {
-        println!("[PSKmap] Body: {}", body);
-    } else {
-        println!("[PSKmap] Body (first 500): {}", &body[..500]);
+    println!("[PSKmap] HTTP response: {} bytes", body.len());
+
+    // pskquery5.pl returns JSON error on rate limit instead of XML
+    if body.trim_start().starts_with('{') {
+        return Err("PSKreporter rate limit — backfill will retry on next subscribe".to_string());
     }
 
     parse_pskreporter_xml(&body)
@@ -84,14 +58,23 @@ pub async fn fetch_spots(query: &SpotQuery) -> Result<Vec<Spot>, String> {
 fn parse_pskreporter_xml(xml: &str) -> Result<Vec<Spot>, String> {
     let mut reader = Reader::from_str(xml);
     let mut spots = Vec::new();
+    let mut reception_count = 0u32;
+    let mut receiver_count = 0u32;
+    let mut other_count = 0u32;
 
     loop {
         match reader.read_event() {
             Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                if e.name().as_ref() == b"receptionReport" {
+                let name = e.name();
+                if name.as_ref() == b"receptionReport" {
+                    reception_count += 1;
                     if let Some(spot) = parse_reception_report(e) {
                         spots.push(spot);
                     }
+                } else if name.as_ref() == b"activeReceiver" {
+                    receiver_count += 1;
+                } else {
+                    other_count += 1;
                 }
             }
             Ok(Event::Eof) => break,
@@ -99,6 +82,11 @@ fn parse_pskreporter_xml(xml: &str) -> Result<Vec<Spot>, String> {
             _ => {}
         }
     }
+
+    println!(
+        "[PSKmap] XML parsed: {} receptionReport, {} activeReceiver, {} other → {} spots",
+        reception_count, receiver_count, other_count, spots.len()
+    );
 
     Ok(spots)
 }
@@ -111,7 +99,10 @@ fn parse_reception_report(e: &quick_xml::events::BytesStart) -> Option<Spot> {
     let mut frequency: u64 = 0;
     let mut mode = String::new();
     let mut snr: Option<i32> = None;
-    let mut timestamp: i64 = 0;
+    let mut timestamp: Option<i64> = None;
+    let mut receiver_dxcc: Option<String> = None;
+    let mut receiver_dxcc_code: Option<String> = None;
+    let mut sender_lotw_upload: Option<String> = None;
 
     for attr in e.attributes().flatten() {
         let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
@@ -134,7 +125,10 @@ fn parse_reception_report(e: &quick_xml::events::BytesStart) -> Option<Spot> {
             "frequency" => frequency = val.parse().unwrap_or(0),
             "mode" => mode = val.to_string(),
             "sNR" => snr = val.parse().ok(),
-            "flowStartSeconds" => timestamp = val.parse().unwrap_or(0),
+            "flowStartSeconds" => timestamp = val.parse().ok(),
+            "receiverDXCC" => receiver_dxcc = Some(val.to_string()),
+            "receiverDXCCCode" => receiver_dxcc_code = Some(val.to_string()),
+            "senderLotwUpload" => sender_lotw_upload = Some(val.to_string()),
             _ => {}
         }
     }
@@ -165,5 +159,12 @@ fn parse_reception_report(e: &quick_xml::events::BytesStart) -> Option<Spot> {
         receiver_lat: receiver_pos.map(|(lat, _)| lat),
         receiver_lon: receiver_pos.map(|(_, lon)| lon),
         distance_km,
+        receiver_dxcc,
+        receiver_dxcc_code,
+        sender_lotw_upload,
+        decoder_software: None,
+        antenna_information: None,
+        rig_information: None,
+        region: None,
     })
 }

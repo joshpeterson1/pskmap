@@ -30,10 +30,10 @@ export function computeGrayline(date: Date = new Date()): LatLngExpression[] {
   // Night pole: opposite of sun's hemisphere
   const nightPole = declination > 0 ? -90 : 90;
 
-  // Build the polygon covering ±540° longitude (3 full world widths)
-  // so that Leaflet's world copies are also covered.
-  const lonMin = -1800;
-  const lonMax = 1800;
+  // Cover ±1080° longitude (6 full world widths) so the grayline extends
+  // across all visible world copies when panning with worldCopyJump.
+  const lonMin = -1080;
+  const lonMax = 1080;
 
   const polygon: LatLngExpression[] = [];
 

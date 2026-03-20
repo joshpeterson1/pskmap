@@ -13,12 +13,19 @@ export interface Spot {
   frequency: number;
   mode: string;
   snr: number | null;
-  timestamp: number;
+  timestamp: number | null;
   senderLat: number | null;
   senderLon: number | null;
   receiverLat: number | null;
   receiverLon: number | null;
   distanceKm: number | null;
+  receiverDxcc: string | null;
+  receiverDxccCode: string | null;
+  senderLotwUpload: string | null;
+  decoderSoftware: string | null;
+  antennaInformation: string | null;
+  rigInformation: string | null;
+  region: string | null;
 }
 
 export type ViewMode = "map" | "table" | "split";

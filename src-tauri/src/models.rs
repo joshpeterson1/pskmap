@@ -19,12 +19,72 @@ pub struct Spot {
     pub frequency: u64,
     pub mode: String,
     pub snr: Option<i32>,
-    pub timestamp: i64,
+    pub timestamp: Option<i64>,
     pub sender_lat: Option<f64>,
     pub sender_lon: Option<f64>,
     pub receiver_lat: Option<f64>,
     pub receiver_lon: Option<f64>,
     pub distance_km: Option<f64>,
+    // From receptionReport
+    pub receiver_dxcc: Option<String>,
+    pub receiver_dxcc_code: Option<String>,
+    pub sender_lotw_upload: Option<String>,
+    // From activeReceiver (enriched onto matching spots, or standalone)
+    pub decoder_software: Option<String>,
+    pub antenna_information: Option<String>,
+    pub rig_information: Option<String>,
+    pub region: Option<String>,
+}
+
+/// Raw MQTT JSON payload from pskr/filter/v2 topic.
+#[derive(Debug, Deserialize)]
+pub struct MqttSpotRaw {
+    pub sq: u64,
+    pub f: u64,
+    pub md: String,
+    pub rp: Option<i32>,
+    pub t: Option<i64>,
+    pub sc: String,
+    pub sl: Option<String>,
+    pub rc: String,
+    pub rl: Option<String>,
+    pub sa: Option<u32>,
+    pub ra: Option<u32>,
+    pub b: Option<String>,
+}
+
+impl From<MqttSpotRaw> for Spot {
+    fn from(raw: MqttSpotRaw) -> Self {
+        let sender_pos = raw.sl.as_deref().and_then(grid_to_latlon);
+        let receiver_pos = raw.rl.as_deref().and_then(grid_to_latlon);
+        let distance_km = match (sender_pos, receiver_pos) {
+            (Some((lat1, lon1)), Some((lat2, lon2))) => Some(haversine_km(lat1, lon1, lat2, lon2)),
+            _ => None,
+        };
+
+        Spot {
+            sender_callsign: raw.sc,
+            receiver_callsign: raw.rc,
+            sender_locator: raw.sl,
+            receiver_locator: raw.rl,
+            frequency: raw.f,
+            mode: raw.md,
+            snr: raw.rp,
+            timestamp: raw.t,
+            sender_lat: sender_pos.map(|(lat, _)| lat),
+            sender_lon: sender_pos.map(|(_, lon)| lon),
+            receiver_lat: receiver_pos.map(|(lat, _)| lat),
+            receiver_lon: receiver_pos.map(|(_, lon)| lon),
+            distance_km,
+            receiver_dxcc: None,
+            receiver_dxcc_code: None,
+            sender_lotw_upload: None,
+            decoder_software: None,
+            antenna_information: None,
+            rig_information: None,
+            region: None,
+        }
+    }
 }
 
 /// Convert a Maidenhead grid locator (4 or 6 char) to (lat, lon) at the center of the square.

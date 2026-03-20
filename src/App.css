@@ -77,6 +77,46 @@ body {
   width: 130px;
 }
 
+.control-group input.input-error {
+  border-color: #da3633;
+}
+
+.field-error {
+  font-size: 10px;
+  color: #da3633;
+}
+
+.callsign-input-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.fav-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.fav-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.fav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.fav-btn--active {
+  color: var(--accent);
+}
+
 .control-panel button[type="submit"] {
   background: var(--accent);
   color: #000;
@@ -138,7 +178,68 @@ body {
   margin-left: 8px;
 }
 
-/* Error bar */
+/* Control panel wrapper */
+.control-panel-wrapper {
+  flex-shrink: 0;
+}
+
+/* Favorites bar */
+.favorites-bar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 16px 6px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+}
+
+.fav-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fav-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fav-chip--active {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.15);
+}
+
+.fav-chip-remove {
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.5;
+  margin-left: 2px;
+}
+
+.fav-chip-remove:hover {
+  opacity: 1;
+  color: #da3633;
+}
+
+/* Status bars */
+.offline-bar {
+  background: #9e6a03;
+  color: #fff;
+  padding: 6px 16px;
+  font-size: 13px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
 .error-bar {
   background: #da3633;
   color: #fff;
@@ -234,8 +335,51 @@ body {
   white-space: nowrap;
 }
 
+.spot-table tbody tr {
+  cursor: pointer;
+}
+
 .spot-table tr:hover td {
   background: var(--bg-tertiary);
+}
+
+.spot-table tr.spot-row-selected td {
+  background: rgba(88, 166, 255, 0.15);
+}
+
+.spot-table tr.spot-row-selected:hover td {
+  background: rgba(88, 166, 255, 0.2);
+}
+
+/* Stats panel */
+.stats-panel {
+  display: flex;
+  gap: 20px;
+  padding: 6px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  white-space: nowrap;
+}
+
+.stat-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 /* Leaflet overrides for dark theme */
@@ -246,4 +390,60 @@ body {
 .spot-popup {
   font-size: 12px;
   line-height: 1.5;
+}
+
+/* Marker cluster overrides for dark theme */
+.marker-cluster-small,
+.marker-cluster-medium,
+.marker-cluster-large {
+  background-color: rgba(88, 166, 255, 0.3);
+}
+
+.marker-cluster-small div,
+.marker-cluster-medium div,
+.marker-cluster-large div {
+  background-color: rgba(88, 166, 255, 0.6);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.marker-cluster-medium {
+  background-color: rgba(88, 166, 255, 0.4);
+}
+
+.marker-cluster-large {
+  background-color: rgba(88, 166, 255, 0.5);
+}
+
+/* Band legend overlay */
+.band-legend {
+  position: absolute;
+  bottom: 24px;
+  right: 12px;
+  z-index: 1000;
+  background: rgba(13, 17, 23, 0.85);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  pointer-events: auto;
+}
+
+.band-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.band-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
