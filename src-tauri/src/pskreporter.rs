@@ -1,6 +1,5 @@
 use crate::models::{grid_to_latlon, haversine_km, Spot, SpotQuery};
-use quick_xml::events::Event;
-use quick_xml::Reader;
+use serde::Deserialize;
 
 /// Shared HTTP client — reused across all requests to keep connections alive.
 static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
@@ -15,13 +14,44 @@ fn get_client() -> &'static reqwest::Client {
     })
 }
 
+/// JSONP response structure from pskquery5.pl with callback=doNothing
+#[derive(Deserialize)]
+struct PskResponse {
+    #[serde(default, rename = "receptionReport")]
+    reception_report: Vec<PskSpot>,
+}
+
+#[derive(Deserialize)]
+struct PskSpot {
+    #[serde(rename = "senderCallsign")]
+    sender_callsign: Option<String>,
+    #[serde(rename = "receiverCallsign")]
+    receiver_callsign: Option<String>,
+    #[serde(rename = "senderLocator")]
+    sender_locator: Option<String>,
+    #[serde(rename = "receiverLocator")]
+    receiver_locator: Option<String>,
+    frequency: Option<u64>,
+    mode: Option<String>,
+    #[serde(rename = "sNR")]
+    snr: Option<i32>,
+    #[serde(rename = "flowStartSeconds")]
+    flow_start_seconds: Option<i64>,
+    #[serde(rename = "receiverDXCC")]
+    receiver_dxcc: Option<String>,
+    #[serde(rename = "receiverDXCCCode")]
+    receiver_dxcc_code: Option<String>,
+    #[serde(rename = "senderLotwUpload")]
+    sender_lotw_upload: Option<String>,
+}
+
 /// Fetch historical spots via the HTTP retrieve API (used for backfill on subscribe).
 pub async fn fetch_spots_http(query: &SpotQuery) -> Result<Vec<Spot>, String> {
-    let callsign = query.callsign.to_uppercase();
+    let callsign = &query.callsign;
 
     let url = format!(
-        "https://pskreporter.info/cgi-bin/pskquery5.pl?senderCallsign={}&noactive=1&nolocator=1&flowStartSeconds=-86400&appcontact=josh%40somber.dev",
-        urlencoding::encode(&callsign),
+        "https://pskreporter.info/cgi-bin/pskquery5.pl?callback=doNothing&mc_version=2025.11.28.1033&pskvers=2025.11.28.1032&statistics=1&noactive=1&nolocator=1&flowStartSeconds=-86400&senderCallsign={}",
+        urlencoding::encode(callsign),
     );
 
     println!("[PSKmap] HTTP backfill: {}", url);
@@ -29,7 +59,8 @@ pub async fn fetch_spots_http(query: &SpotQuery) -> Result<Vec<Spot>, String> {
     let client = get_client();
     let resp = client
         .get(&url)
-        .header("User-Agent", "PSKmap/0.1.0")
+        .header("referer", "https://pskreporter.info/pskmap.html")
+        .header("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36")
         .send()
         .await
         .map_err(|e| format!("HTTP request failed: {}", e))?;
@@ -47,124 +78,75 @@ pub async fn fetch_spots_http(query: &SpotQuery) -> Result<Vec<Spot>, String> {
 
     println!("[PSKmap] HTTP response: {} bytes", body.len());
 
-    // pskquery5.pl returns JSON error on rate limit instead of XML
+    // Rate limit returns a JSON object with "message" key
     if body.trim_start().starts_with('{') {
         return Err("PSKreporter rate limit — backfill will retry on next subscribe".to_string());
     }
 
-    parse_pskreporter_xml(&body)
+    parse_jsonp_response(&body)
 }
 
-fn parse_pskreporter_xml(xml: &str) -> Result<Vec<Spot>, String> {
-    let mut reader = Reader::from_str(xml);
-    let mut spots = Vec::new();
-    let mut reception_count = 0u32;
-    let mut receiver_count = 0u32;
-    let mut other_count = 0u32;
+fn parse_jsonp_response(body: &str) -> Result<Vec<Spot>, String> {
+    // Strip JSONP wrapper: doNothing({ ... })
+    let json = body
+        .find('(')
+        .and_then(|start| body.rfind(')').map(|end| &body[start + 1..end]))
+        .ok_or_else(|| "Invalid JSONP response".to_string())?;
 
-    loop {
-        match reader.read_event() {
-            Ok(Event::Empty(ref e)) | Ok(Event::Start(ref e)) => {
-                let name = e.name();
-                if name.as_ref() == b"receptionReport" {
-                    reception_count += 1;
-                    if let Some(spot) = parse_reception_report(e) {
-                        spots.push(spot);
-                    }
-                } else if name.as_ref() == b"activeReceiver" {
-                    receiver_count += 1;
-                } else {
-                    other_count += 1;
+    let response: PskResponse =
+        serde_json::from_str(json).map_err(|e| format!("JSON parse error: {}", e))?;
+
+    let total = response.reception_report.len();
+    let spots: Vec<Spot> = response
+        .reception_report
+        .into_iter()
+        .filter_map(|s| {
+            let sender_callsign = s.sender_callsign.filter(|v| !v.is_empty())?;
+            let receiver_callsign = s.receiver_callsign.filter(|v| !v.is_empty())?;
+
+            let sender_locator = s.sender_locator.filter(|v| !v.is_empty());
+            let receiver_locator = s.receiver_locator.filter(|v| !v.is_empty());
+
+            let sender_pos = sender_locator.as_deref().and_then(grid_to_latlon);
+            let receiver_pos = receiver_locator.as_deref().and_then(grid_to_latlon);
+
+            let distance_km = match (sender_pos, receiver_pos) {
+                (Some((lat1, lon1)), Some((lat2, lon2))) => {
+                    Some(haversine_km(lat1, lon1, lat2, lon2))
                 }
-            }
-            Ok(Event::Eof) => break,
-            Err(e) => return Err(format!("XML parse error: {}", e)),
-            _ => {}
-        }
-    }
+                _ => None,
+            };
+
+            Some(Spot {
+                sender_callsign,
+                receiver_callsign,
+                sender_locator,
+                receiver_locator,
+                frequency: s.frequency.unwrap_or(0),
+                mode: s.mode.unwrap_or_default(),
+                snr: s.snr,
+                timestamp: s.flow_start_seconds,
+                sender_lat: sender_pos.map(|(lat, _)| lat),
+                sender_lon: sender_pos.map(|(_, lon)| lon),
+                receiver_lat: receiver_pos.map(|(lat, _)| lat),
+                receiver_lon: receiver_pos.map(|(_, lon)| lon),
+                distance_km,
+                receiver_dxcc: s.receiver_dxcc,
+                receiver_dxcc_code: s.receiver_dxcc_code,
+                sender_lotw_upload: s.sender_lotw_upload,
+                decoder_software: None,
+                antenna_information: None,
+                rig_information: None,
+                region: None,
+            })
+        })
+        .collect();
 
     println!(
-        "[PSKmap] XML parsed: {} receptionReport, {} activeReceiver, {} other → {} spots",
-        reception_count, receiver_count, other_count, spots.len()
+        "[PSKmap] JSONP parsed: {} receptionReport → {} spots",
+        total,
+        spots.len()
     );
 
     Ok(spots)
-}
-
-fn parse_reception_report(e: &quick_xml::events::BytesStart) -> Option<Spot> {
-    let mut sender_callsign = String::new();
-    let mut receiver_callsign = String::new();
-    let mut sender_locator: Option<String> = None;
-    let mut receiver_locator: Option<String> = None;
-    let mut frequency: u64 = 0;
-    let mut mode = String::new();
-    let mut snr: Option<i32> = None;
-    let mut timestamp: Option<i64> = None;
-    let mut receiver_dxcc: Option<String> = None;
-    let mut receiver_dxcc_code: Option<String> = None;
-    let mut sender_lotw_upload: Option<String> = None;
-
-    for attr in e.attributes().flatten() {
-        let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("");
-        let val = attr.unescape_value().unwrap_or_default();
-        match key {
-            "senderCallsign" => sender_callsign = val.to_string(),
-            "receiverCallsign" => receiver_callsign = val.to_string(),
-            "senderLocator" => {
-                let v = val.to_string();
-                if !v.is_empty() {
-                    sender_locator = Some(v);
-                }
-            }
-            "receiverLocator" => {
-                let v = val.to_string();
-                if !v.is_empty() {
-                    receiver_locator = Some(v);
-                }
-            }
-            "frequency" => frequency = val.parse().unwrap_or(0),
-            "mode" => mode = val.to_string(),
-            "sNR" => snr = val.parse().ok(),
-            "flowStartSeconds" => timestamp = val.parse().ok(),
-            "receiverDXCC" => receiver_dxcc = Some(val.to_string()),
-            "receiverDXCCCode" => receiver_dxcc_code = Some(val.to_string()),
-            "senderLotwUpload" => sender_lotw_upload = Some(val.to_string()),
-            _ => {}
-        }
-    }
-
-    if sender_callsign.is_empty() || receiver_callsign.is_empty() {
-        return None;
-    }
-
-    let sender_pos = sender_locator.as_deref().and_then(grid_to_latlon);
-    let receiver_pos = receiver_locator.as_deref().and_then(grid_to_latlon);
-
-    let distance_km = match (sender_pos, receiver_pos) {
-        (Some((lat1, lon1)), Some((lat2, lon2))) => Some(haversine_km(lat1, lon1, lat2, lon2)),
-        _ => None,
-    };
-
-    Some(Spot {
-        sender_callsign,
-        receiver_callsign,
-        sender_locator,
-        receiver_locator,
-        frequency,
-        mode,
-        snr,
-        timestamp,
-        sender_lat: sender_pos.map(|(lat, _)| lat),
-        sender_lon: sender_pos.map(|(_, lon)| lon),
-        receiver_lat: receiver_pos.map(|(lat, _)| lat),
-        receiver_lon: receiver_pos.map(|(_, lon)| lon),
-        distance_km,
-        receiver_dxcc,
-        receiver_dxcc_code,
-        sender_lotw_upload,
-        decoder_software: None,
-        antenna_information: None,
-        rig_information: None,
-        region: None,
-    })
 }
