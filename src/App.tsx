@@ -15,12 +15,12 @@ function App() {
   const online = useOnlineStatus();
 
   const handleFetch = useCallback(
-    (callsign: string, band: string, mode: string, timeRange: number) => {
+    (callsign: string, bands: string[], modes: string[], timeRange: number) => {
       setSelectedSpot(null);
       fetchSpots({
         callsign,
-        band: band === "All" ? null : band,
-        mode: mode === "All" ? null : mode,
+        bands,
+        modes,
         timeRangeSeconds: timeRange,
       });
     },

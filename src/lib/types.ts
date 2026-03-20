@@ -1,7 +1,7 @@
 export interface SpotQuery {
   callsign: string;
-  band: string | null;
-  mode: string | null;
+  bands: string[];
+  modes: string[];
   timeRangeSeconds: number;
 }
 

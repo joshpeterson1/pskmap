@@ -6,7 +6,22 @@
       "Bash(cargo --version)",
       "Bash(npm --version)",
       "Bash(npm install:*)",
-      "Bash(cargo update:*)"
+      "Bash(cargo update:*)",
+      "Bash(find /c/Users/somber/Documents/GitHub/pskmap/src-tauri/src -type f -name *.rs)",
+      "Bash(ls:*)",
+      "Bash(cargo check:*)",
+      "WebFetch(domain:retrieve.pskreporter.info)",
+      "Bash(curl -s \"https://retrieve.pskreporter.info/query?senderCallsign=KK7QAS&noactive=1&nolocator=1&statistics=1&appcontact=josh%40somber.dev&flowStartSeconds=-86400\" -o /tmp/psk_with_stats.xml)",
+      "Read(//tmp/**)",
+      "WebFetch(domain:mqtt.pskreporter.info)",
+      "Bash(curl -s -L -m 15 --insecure https://pskreporter.info/pskdev.html)",
+      "Bash(curl -s -L -m 15 --insecure http://mqtt.pskreporter.info/)",
+      "Bash(curl -s -L -m 15 --insecure https://mqtt.pskreporter.info/)",
+      "Bash(curl -s -L -m 15 --insecure https://pskreporter.info/mqtt)",
+      "Bash(curl -s -L -m 15 \"http://mqtt.pskreporter.info/status\")",
+      "WebSearch",
+      "WebFetch(domain:api.pota.app)",
+      "WebFetch(domain:api2.sota.org.uk)"
     ]
   }
 }

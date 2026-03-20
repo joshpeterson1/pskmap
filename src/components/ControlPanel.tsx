@@ -4,7 +4,7 @@ import { MODES } from "../lib/modes";
 import type { ViewMode } from "../lib/types";
 
 interface Props {
-  onFetch: (callsign: string, band: string, mode: string, timeRange: number) => void;
+  onFetch: (callsign: string, bands: string[], modes: string[], timeRange: number) => void;
   loading: boolean;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
@@ -12,6 +12,9 @@ interface Props {
 }
 
 const TIME_RANGES = [
+  { label: "1 min", value: 60 },
+  { label: "5 min", value: 300 },
+  { label: "10 min", value: 600 },
   { label: "15 min", value: 900 },
   { label: "30 min", value: 1800 },
   { label: "1 hour", value: 3600 },
@@ -29,15 +32,26 @@ const CALLSIGN_RE = /^[A-Z0-9]{1,3}[0-9][A-Z]{1,4}(\/[A-Z0-9]+)?$/i;
 
 interface SavedPrefs {
   callsign: string;
-  band: string;
-  mode: string;
+  bands: string[];
+  modes: string[];
   timeRange: number;
 }
 
 function loadPrefs(): Partial<SavedPrefs> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    // Migrate old single-value prefs to arrays
+    if (typeof parsed.band === "string") {
+      parsed.bands = parsed.band === "All" ? [] : [parsed.band];
+      delete parsed.band;
+    }
+    if (typeof parsed.mode === "string") {
+      parsed.modes = parsed.mode === "All" ? [] : [parsed.mode];
+      delete parsed.mode;
+    }
+    return parsed;
   } catch {
     return {};
   }
@@ -66,20 +80,29 @@ function saveFavorites(favs: string[]) {
 
 const VIEW_MODES: ViewMode[] = ["map", "split", "table"];
 
+// All band options excluding "All"
+const BAND_OPTIONS = BAND_NAMES.filter((b) => b !== "All");
+// All mode options excluding "All"
+const MODE_OPTIONS = MODES.filter((m) => m !== "All");
+
+function toggleInArray(arr: string[], item: string): string[] {
+  return arr.includes(item) ? arr.filter((v) => v !== item) : [...arr, item];
+}
+
 export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spotCount }: Props) {
   const saved = useRef(loadPrefs()).current;
   const [callsign, setCallsign] = useState(saved.callsign ?? "");
-  const [band, setBand] = useState(saved.band ?? "All");
-  const [mode, setMode] = useState(saved.mode ?? "All");
+  const [bands, setBands] = useState<string[]>(saved.bands ?? []);
+  const [modes, setModes] = useState<string[]>(saved.modes ?? []);
   const [timeRange, setTimeRange] = useState(saved.timeRange ?? 3600);
   const [favorites, setFavorites] = useState(loadFavorites);
   const [callsignError, setCallsignError] = useState<string | null>(null);
-  const lastFetchRef = useRef<{ callsign: string; band: string; mode: string; timeRange: number } | null>(null);
+  const lastFetchRef = useRef<{ callsign: string; bands: string[]; modes: string[]; timeRange: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validateCallsign = (cs: string): string | null => {
     const trimmed = cs.trim();
-    if (!trimmed) return null; // empty is not an error, just disables fetch
+    if (!trimmed) return null;
     if (trimmed.length < 3) return "Too short";
     if (!CALLSIGN_RE.test(trimmed)) return "Invalid callsign format";
     return null;
@@ -95,10 +118,20 @@ export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spo
       return;
     }
     setCallsignError(null);
-    lastFetchRef.current = { callsign: cs, band, mode, timeRange };
-    savePrefs({ callsign: cs, band, mode, timeRange });
-    onFetch(cs, band, mode, timeRange);
-  }, [callsign, band, mode, timeRange, onFetch]);
+    lastFetchRef.current = { callsign: cs, bands, modes, timeRange };
+    savePrefs({ callsign: cs, bands, modes, timeRange });
+    onFetch(cs, bands, modes, timeRange);
+  }, [callsign, bands, modes, timeRange, onFetch]);
+
+  // Auto-apply filter changes when bands/modes/timeRange change (if already tracking)
+  useEffect(() => {
+    if (lastFetchRef.current) {
+      const cs = lastFetchRef.current.callsign;
+      lastFetchRef.current = { callsign: cs, bands, modes, timeRange };
+      savePrefs({ callsign: cs, bands, modes, timeRange });
+      onFetch(cs, bands, modes, timeRange);
+    }
+  }, [bands, modes, timeRange]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,7 +172,6 @@ export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spo
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Escape: clear callsign input and focus it
       if (e.key === "Escape") {
         e.preventDefault();
         setCallsign("");
@@ -148,26 +180,22 @@ export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spo
         return;
       }
 
-      // Don't intercept when typing in an input/select
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
 
-      // 1/2/3: switch view modes
       if (e.key === "1") { onViewModeChange("map"); return; }
       if (e.key === "2") { onViewModeChange("split"); return; }
       if (e.key === "3") { onViewModeChange("table"); return; }
 
-      // /: focus callsign input
       if (e.key === "/") {
         e.preventDefault();
         inputRef.current?.focus();
         return;
       }
 
-      // r: refresh (re-fetch last query)
       if (e.key === "r" && lastFetchRef.current && !loading) {
         const last = lastFetchRef.current;
-        onFetch(last.callsign, last.band, last.mode, last.timeRange);
+        onFetch(last.callsign, last.bands, last.modes, last.timeRange);
       }
     };
     window.addEventListener("keydown", handler);
@@ -204,21 +232,45 @@ export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spo
         </div>
 
         <div className="control-group">
-          <label htmlFor="band">Band</label>
-          <select id="band" value={band} onChange={(e) => setBand(e.target.value)}>
-            {BAND_NAMES.map((b) => (
-              <option key={b} value={b}>{b}</option>
+          <label>Band {bands.length > 0 && <span className="filter-count">({bands.length})</span>}</label>
+          <div className="multi-select">
+            {BAND_OPTIONS.map((b) => (
+              <button
+                key={b}
+                type="button"
+                className={`chip ${bands.includes(b) ? "chip--active" : ""}`}
+                onClick={() => setBands((prev) => toggleInArray(prev, b))}
+              >
+                {b}
+              </button>
             ))}
-          </select>
+            {bands.length > 0 && (
+              <button type="button" className="chip chip--clear" onClick={() => setBands([])}>
+                Clear
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="control-group">
-          <label htmlFor="mode">Mode</label>
-          <select id="mode" value={mode} onChange={(e) => setMode(e.target.value)}>
-            {MODES.map((m) => (
-              <option key={m} value={m}>{m}</option>
+          <label>Mode {modes.length > 0 && <span className="filter-count">({modes.length})</span>}</label>
+          <div className="multi-select">
+            {MODE_OPTIONS.map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={`chip ${modes.includes(m) ? "chip--active" : ""}`}
+                onClick={() => setModes((prev) => toggleInArray(prev, m))}
+              >
+                {m}
+              </button>
             ))}
-          </select>
+            {modes.length > 0 && (
+              <button type="button" className="chip chip--clear" onClick={() => setModes([])}>
+                Clear
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="control-group">
@@ -247,9 +299,7 @@ export function ControlPanel({ onFetch, loading, viewMode, onViewModeChange, spo
           ))}
         </div>
 
-        <span className="spot-count">
-          {spotCount} spot{spotCount !== 1 ? "s" : ""}
-        </span>
+
       </form>
 
       {favorites.length > 0 && (

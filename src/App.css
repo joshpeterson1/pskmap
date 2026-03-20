@@ -230,6 +230,61 @@ body {
   color: #da3633;
 }
 
+/* Multi-select chips */
+.multi-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 340px;
+}
+
+.chip {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.1s;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.chip--active {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+}
+
+.chip--clear {
+  color: var(--text-secondary);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.chip--clear:hover {
+  color: #da3633;
+  border-color: #da3633;
+}
+
+.filter-count {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 400;
+}
+
+.td-ago {
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 /* Status bars */
 .offline-bar {
   background: #9e6a03;

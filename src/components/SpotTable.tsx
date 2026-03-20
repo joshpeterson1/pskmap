@@ -13,10 +13,25 @@ interface IndexedSpot {
   originalIndex: number;
 }
 
+function formatTimeDelta(timestamp: number | null): string {
+  if (timestamp == null) return "\u2014";
+  const deltaSeconds = Math.floor(Date.now() / 1000) - timestamp;
+  if (deltaSeconds < 0) return "just now";
+  if (deltaSeconds < 60) return `${deltaSeconds}s ago`;
+  if (deltaSeconds < 3600) return `${Math.floor(deltaSeconds / 60)}m ago`;
+  if (deltaSeconds < 86400) {
+    const h = Math.floor(deltaSeconds / 3600);
+    const m = Math.floor((deltaSeconds % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m ago` : `${h}h ago`;
+  }
+  return `${Math.floor(deltaSeconds / 86400)}d ago`;
+}
+
 export function SpotTable({ spots, selectedIndex, onSelectSpot }: Props) {
   const [sortField, setSortField] = useState<SortField>("timestamp");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const selectedRowRef = useRef<HTMLTableRowElement>(null);
+  const [, setTick] = useState(0);
 
   const toggleSort = (field: SortField) => {
     if (sortField === field) {
@@ -26,6 +41,12 @@ export function SpotTable({ spots, selectedIndex, onSelectSpot }: Props) {
       setSortDir("desc");
     }
   };
+
+  // Tick every 10s to keep time deltas fresh
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 10000);
+    return () => clearInterval(id);
+  }, []);
 
   const sorted = useMemo(() => {
     const arr: IndexedSpot[] = spots.map((spot, i) => ({ spot, originalIndex: i }));
@@ -58,8 +79,9 @@ export function SpotTable({ spots, selectedIndex, onSelectSpot }: Props) {
         <thead>
           <tr>
             <th onClick={() => toggleSort("timestamp")}>Time (UTC){sortIcon("timestamp")}</th>
-            <th onClick={() => toggleSort("senderCallsign")}>TX{sortIcon("senderCallsign")}</th>
+            <th onClick={() => toggleSort("timestamp")}>Ago</th>
             <th onClick={() => toggleSort("receiverCallsign")}>RX{sortIcon("receiverCallsign")}</th>
+            <th onClick={() => toggleSort("senderCallsign")}>TX{sortIcon("senderCallsign")}</th>
             <th onClick={() => toggleSort("frequency")}>Freq / Band{sortIcon("frequency")}</th>
             <th onClick={() => toggleSort("mode")}>Mode{sortIcon("mode")}</th>
             <th onClick={() => toggleSort("snr")}>SNR{sortIcon("snr")}</th>
@@ -72,7 +94,7 @@ export function SpotTable({ spots, selectedIndex, onSelectSpot }: Props) {
             const color = freqToBandColor(spot.frequency);
             const timeStr = spot.timestamp != null
               ? new Date(spot.timestamp * 1000).toISOString().slice(11, 19)
-              : "—";
+              : "\u2014";
             const isSelected = selectedIndex === originalIndex;
             return (
               <tr
@@ -83,8 +105,9 @@ export function SpotTable({ spots, selectedIndex, onSelectSpot }: Props) {
                 onClick={() => onSelectSpot?.(isSelected ? null : originalIndex)}
               >
                 <td>{timeStr}</td>
-                <td>{spot.senderCallsign}</td>
+                <td className="td-ago">{formatTimeDelta(spot.timestamp)}</td>
                 <td>{spot.receiverCallsign}</td>
+                <td style={{ fontWeight: 700 }}>{spot.senderCallsign}</td>
                 <td>{formatFreq(spot.frequency)} {band && `(${band})`}</td>
                 <td>{spot.mode}</td>
                 <td>{spot.snr != null ? `${spot.snr} dB` : "\u2014"}</td>

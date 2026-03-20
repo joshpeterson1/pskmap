@@ -14,11 +14,11 @@ function humanizeError(raw: string): string {
   return raw;
 }
 
-/** Filter spots by band, mode, and time range client-side. */
+/** Filter spots by bands, modes, and time range client-side. */
 function filterSpots(
   spots: Spot[],
-  band: string | null,
-  mode: string | null,
+  bands: string[],
+  modes: string[],
   timeRangeSeconds: number
 ): Spot[] {
   const now = Math.floor(Date.now() / 1000);
@@ -27,12 +27,17 @@ function filterSpots(
   return spots.filter((s) => {
     if (s.timestamp != null && s.timestamp < cutoff) return false;
 
-    if (band) {
-      const info = BANDS[band];
-      if (info && (s.frequency < info.freqLow || s.frequency > info.freqHigh)) return false;
+    if (bands.length > 0) {
+      const match = bands.some((band) => {
+        const info = BANDS[band];
+        return info && s.frequency >= info.freqLow && s.frequency <= info.freqHigh;
+      });
+      if (!match) return false;
     }
 
-    if (mode && s.mode.toLowerCase() !== mode.toLowerCase()) return false;
+    if (modes.length > 0) {
+      if (!modes.some((m) => s.mode.toLowerCase() === m.toLowerCase())) return false;
+    }
 
     return true;
   });
@@ -40,9 +45,9 @@ function filterSpots(
 
 export function useSpots() {
   const [rawSpots, setRawSpots] = useState<Spot[]>([]);
-  const [filters, setFilters] = useState<{ band: string | null; mode: string | null; timeRangeSeconds: number }>({
-    band: null,
-    mode: null,
+  const [filters, setFilters] = useState<{ bands: string[]; modes: string[]; timeRangeSeconds: number }>({
+    bands: [],
+    modes: [],
     timeRangeSeconds: 3600,
   });
   const [loading, setLoading] = useState(false);
@@ -95,19 +100,19 @@ export function useSpots() {
 
   // Filtered view
   const spots = useMemo(
-    () => filterSpots(rawSpots, filters.band, filters.mode, filters.timeRangeSeconds),
+    () => filterSpots(rawSpots, filters.bands, filters.modes, filters.timeRangeSeconds),
     [rawSpots, filters]
   );
 
   const fetchSpots = useCallback(
-    async (query: { callsign: string; band: string | null; mode: string | null; timeRangeSeconds: number }) => {
+    async (query: { callsign: string; bands: string[]; modes: string[]; timeRangeSeconds: number }) => {
       const callsign = query.callsign;
-      const band = query.band && query.band !== "All" ? query.band : null;
-      const mode = query.mode && query.mode !== "All" ? query.mode : null;
+      const bands = query.bands;
+      const modes = query.modes;
       const timeRangeSeconds = Math.abs(query.timeRangeSeconds);
 
       // Always update filters
-      setFilters({ band, mode, timeRangeSeconds });
+      setFilters({ bands, modes, timeRangeSeconds });
 
       // If same callsign, just a filter change — no need to resubscribe
       if (callsign === activeCallsign.current) return;
